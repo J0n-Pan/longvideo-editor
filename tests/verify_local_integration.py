@@ -3,12 +3,16 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[3]
 os.environ['LONGVIDEO_DATA']=str(root/'work/integration-data')
 os.environ['LONGVIDEO_EXPORTS']=str(root/'work/integration-exports')
+os.environ['LONGVIDEO_TRANSCRIPTS']=str(root/'work/integration-transcripts')
 sys.path.insert(0,str(root/'outputs/longvideo-editor'))
 from media import ffmpeg,probe,render,binaries
 from domain import make_item
 from fastapi.testclient import TestClient
 from app import app
+import app as application
 from storage import get,save
+# This local export check must never submit an automatic cloud transcription.
+application.get_key=lambda: ''
 H={'X-Longvideo-Client':'1'}
 folder=root/'work/integration-data';fixture=folder/'fixture.mp4'
 ffmpeg(['-f','lavfi','-i','color=c=red:s=320x180:r=25:d=4',
@@ -30,6 +34,10 @@ with TestClient(app,base_url='http://127.0.0.1') as c:
     save('project',p)
     group={'id':'test-group','name':'本地测试:蓝色先/红色后','items':[make_item(sentences[1]),make_item(sentences[0])]}
     assert c.put(f"/api/projects/{p['id']}/groups",headers=H,json={'groups':[group]}).status_code==200
+    destination=folder/'自定义导出'
+    saved=c.put('/api/settings',headers=H,json={'exports_path':str(destination)})
+    assert saved.status_code==200,saved.text
+    assert Path(c.get('/api/info').json()['exports_path'])==destination.resolve()
     bad={**group,'items':[{**group['items'][0],'end_ms':9000}]}
     assert c.put(f"/api/projects/{p['id']}/groups",headers=H,json={'groups':[bad]}).status_code==400
     plan=c.post(f"/api/projects/{p['id']}/export-plan",headers=H,json={}).json()
@@ -42,6 +50,8 @@ with TestClient(app,base_url='http://127.0.0.1') as c:
         time.sleep(.2)
     assert job['status']=='succeeded',job
     result=Path(job['results'][0]['path']);meta=probe(result)
+    assert result.parent==destination.resolve(),result
+    assert result.with_suffix('.srt').is_file() and result.with_suffix('.json').is_file()
     assert abs(meta['duration_ms']-plan[0]['duration_ms'])<100,(meta['duration_ms'],plan)
     def output(args):
         return subprocess.check_output([binaries()['ffmpeg'],'-v','error',*map(str,args)],creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
@@ -58,6 +68,6 @@ with TestClient(app,base_url='http://127.0.0.1') as c:
     srt=result.with_suffix('.srt').read_text(encoding='utf-8-sig')
     assert srt.index('蓝画面高音')<srt.index('红画面低音')
     assert c.get('/api/exports/'+result.name).status_code==200
-    report={'status':'passed','checks':['origin guard','import','group persistence','invalid bounds rejected','filename normalization','video Range request','background export','duration','reordered decoded colors','reordered audio frequencies','SRT mapping','file download'], 'output_ms':meta['duration_ms'],'planned_ms':plan[0]['duration_ms'],'decoded_colors':colors,'decoded_frequencies':frequencies}
+    report={'status':'passed','checks':['origin guard','import','group persistence','custom export folder persistence','MP4 and sidecars in custom folder','invalid bounds rejected','filename normalization','video Range request','background export','duration','reordered decoded colors','reordered audio frequencies','SRT mapping','file download'], 'output_ms':meta['duration_ms'],'planned_ms':plan[0]['duration_ms'],'decoded_colors':colors,'decoded_frequencies':frequencies}
     (root/'work/local-integration-result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
     print(json.dumps(report,ensure_ascii=False))

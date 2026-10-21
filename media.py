@@ -8,7 +8,7 @@ import tempfile
 import time
 from fractions import Fraction
 
-from storage import DATA, TOOLS, EXPORTS, json_write
+from storage import DATA, TOOLS, export_directory, json_write
 from domain import composition, subtitles, choose_names
 
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -127,9 +127,12 @@ def sha256(path):
     return h.hexdigest()
 
 
-def render(project, groups, job_id, progress=None, cancel=None):
+def render(project, groups, job_id, progress=None, cancel=None, output_directory=None):
     verify_source(project)
-    plans = choose_names(groups, [p.name for p in EXPORTS.iterdir()])
+    destination = Path(output_directory) if output_directory is not None else export_directory()
+    if not destination.is_dir():
+        raise ValueError('导出目录不存在，请在设置中重新保存路径。')
+    plans = choose_names(groups, [p.name for p in destination.iterdir()])
     results = []
     fps = project['media']['fps']
     if project['media'].get('color_transfer') in ('smpte2084', 'arib-std-b67'):
@@ -164,11 +167,11 @@ def render(project, groups, job_id, progress=None, cancel=None):
             total = sum(s['actual_duration_ms'] for s in spans) / 1000
             ffmpeg(['-f', 'concat', '-safe', '0', '-i', listing, '-c:v', 'copy', '-c:a', 'aac',
                     '-b:a', '192k', '-movflags', '+faststart', merged], total, None, cancel)
-            final = EXPORTS / plan['file_name']
+            final = destination / plan['file_name']
             # Windows rename is non-overwriting. Re-resolve names if another app created a file meanwhile.
             if final.exists():
-                plan = choose_names([group], [p.name for p in EXPORTS.iterdir()])[0]
-                final = EXPORTS / plan['file_name']
+                plan = choose_names([group], [p.name for p in destination.iterdir()])[0]
+                final = destination / plan['file_name']
             os.rename(merged, final)
             final.with_suffix('.srt').write_text(subtitles(spans), encoding='utf-8-sig')
             bundle = {'schema': 1, 'source_path': project['path'], 'source_id': project['id'],
