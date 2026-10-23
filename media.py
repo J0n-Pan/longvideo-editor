@@ -5,11 +5,10 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
-import time
 from fractions import Fraction
 
-from storage import DATA, TOOLS, export_directory, json_write
-from domain import composition, subtitles, choose_names
+from storage import DATA, TOOLS, export_directory
+from domain import composition, choose_names
 from runtime_paths import is_frozen
 
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -147,7 +146,10 @@ def render(project, groups, job_id, progress=None, cancel=None, output_directory
         spans = composition(group, project['media']['duration_ms'], fps)
         if not spans:
             continue
-        with tempfile.TemporaryDirectory(prefix='render_', dir=DATA / 'jobs') as td:
+        # Keep the final MP4 on the destination volume so publishing it with
+        # rename also works when the job cache and export folder use different drives.
+        with (tempfile.TemporaryDirectory(prefix='render_', dir=DATA / 'jobs') as td,
+              tempfile.TemporaryDirectory(prefix='.longvideo-export-', dir=destination) as output_td):
             folder = Path(td)
             parts = []
             for i, span in enumerate(spans):
@@ -169,7 +171,7 @@ def render(project, groups, job_id, progress=None, cancel=None, output_directory
                 parts.append(part)
             listing = folder / 'concat.txt'
             listing.write_text(''.join(f"file '{p.name}'\n" for p in parts), encoding='utf-8')
-            merged = folder / 'merged.mp4'
+            merged = Path(output_td) / 'merged.mp4'
             total = sum(s['actual_duration_ms'] for s in spans) / 1000
             ffmpeg(['-f', 'concat', '-safe', '0', '-i', listing, '-c:v', 'copy', '-c:a', 'aac',
                     '-b:a', '192k', '-movflags', '+faststart', merged], total, None, cancel)
@@ -179,11 +181,6 @@ def render(project, groups, job_id, progress=None, cancel=None, output_directory
                 plan = choose_names([group], [p.name for p in destination.iterdir()])[0]
                 final = destination / plan['file_name']
             os.rename(merged, final)
-            final.with_suffix('.srt').write_text(subtitles(spans), encoding='utf-8-sig')
-            bundle = {'schema': 1, 'source_path': project['path'], 'source_id': project['id'],
-                      'group': group, 'spans': spans, 'file_name': final.name,
-                      'created_at': time.time(), 'model': 'paraformer-v2'}
-            json_write(final.with_suffix('.json'), bundle)
             result = {'name': group['name'], 'file_name': final.name, 'path': str(final),
                       'duration_ms': probe(final)['duration_ms'], 'group_id': group['id']}
             results.append(result)

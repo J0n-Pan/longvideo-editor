@@ -1,6 +1,6 @@
 # 长素材选句工作台
 
-面向 Windows 本机单人使用的长视频选句工具：导入素材后自动转写音频，通过带时间定位的文稿挑选内容，人工分组、排序、命名，再导出短视频与独立字幕。
+面向 Windows 本机单人使用的长视频选句工具：导入素材后自动转写音频，通过带时间定位的文稿挑选内容，人工分组、排序、命名，再导出 MP4 短视频。
 
 当前定位是可运行的本机验证版，主要适用于单人口播。云端转写使用阿里云百炼录音模型 `paraformer-v2`；视频预览、项目保存和成片导出在本地完成。
 
@@ -11,7 +11,7 @@
                                   ↓
                     人工分组、拖动排序、命名
                                   ↓
-                       MP4 + SRT + JSON
+                            MP4
 
 完整转写文稿也可单独导出为 TXT。
 ```
@@ -39,7 +39,7 @@
 | 选择 | 单句勾选、Shift 连续选择、按序号批量选择，如 `1-5,8,12-15` |
 | 分组 | 人工创建短片分组、导出前命名、组内拖动重排、移除片段、会话内撤销 |
 | 边界 | 按原视频秒数手动调整片段起止位置，支持按组预览 |
-| 导出 | 当前组或全部非空分组导出 MP4、独立 SRT、回溯 JSON；完整文稿单独导出 TXT |
+| 导出 | 当前组或全部非空分组仅导出 MP4；完整文稿通过“导出文稿”单独导出 TXT |
 | 位置 | 视频、文稿各自设置文件夹；点击“更改”打开系统选择窗口，选定后自动保存 |
 | 任务 | 顶部“后台任务”按需展示队列、进度、错误、刷新与取消操作 |
 
@@ -47,9 +47,9 @@
 
 ## Windows 免安装测试包
 
-当前包版本为 `0.2.0-test.1`。完整解压 `LongVideoEditor-0.2.0-test.1-windows-x64.zip` 后，双击其中的 `启动工作台.cmd`；浏览器会自动打开工作台。在“设置”中填写自己的百炼 Key，选择输出目录后即可导入素材。无需安装 Python 或 Git。完整说明见 [WINDOWS-QUICKSTART.md](WINDOWS-QUICKSTART.md)。
+当前构建版本为 `0.2.0-test.3`，视频导出仅生成 MP4，并包含 C 盘缓存、D 盘导出等跨盘场景下的 `[WinError 17]` 修复。完整解压 `LongVideoEditor-0.2.0-test.3-windows-x64.zip` 后，双击其中的 `启动工作台.cmd`；浏览器会自动打开工作台。在“设置”中填写自己的百炼 Key，选择输出目录后即可导入素材。无需安装 Python 或 Git。完整说明见 [WINDOWS-QUICKSTART.md](WINDOWS-QUICKSTART.md)。
 
-[下载 Windows x64 测试包（97.8 MB）](https://github.com/J0n-Pan/longvideo-editor/releases/download/v0.2.0-test.1/LongVideoEditor-0.2.0-test.1-windows-x64.zip) · [SHA-256 校验文件](https://github.com/J0n-Pan/longvideo-editor/releases/download/v0.2.0-test.1/LongVideoEditor-0.2.0-test.1-windows-x64.zip.sha256) · [版本说明](https://github.com/J0n-Pan/longvideo-editor/releases/tag/v0.2.0-test.1)
+已发布的 Windows x64 测试包、SHA-256 校验文件与版本说明见 [GitHub Releases](https://github.com/J0n-Pan/longvideo-editor/releases)。请以发布页实际提供的附件版本为准；仓库中的版本号不表示对应程序包已发布。
 
 ZIP 是程序文件夹的压缩包，不是单文件安装向导；请完整解压并保留 `_internal`。程序资源随包提供，转写仍需要网络和百炼服务。安装包单独构建，不包含在仓库自动生成的源码 ZIP 中。
 
@@ -79,7 +79,7 @@ Python 依赖固定在 [requirements-lock.txt](requirements-lock.txt)。FFmpeg �
 LongVideoWorkspace/
 ├─ outputs/
 │  ├─ longvideo-editor/        # 本 Git 仓库
-│  ├─ short-clips/            # 默认视频、字幕与 JSON 输出，不入库
+│  ├─ short-clips/            # 默认 MP4 输出，不入库
 │  └─ transcripts/            # 默认 TXT 文稿输出，不入库
 └─ work/
    ├─ longvideo-venv/          # Python 虚拟环境，不入库
@@ -173,7 +173,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 批量选择保留已经勾选的句子，重复序号自动合并，错误范围会给出提示。“清除选择”用于重新开始；当前没有“全选”或“反选”入口。
 
-句子右侧的修正按钮只修改显示文字和字幕文本，原声、句子定位及字词时间戳不随文字修改而变化。
+句子右侧的修正按钮修改显示文字和导出文稿的文字，原声、句子定位及字词时间戳不随文字修改而变化。
 
 ### 4. 整理短片分组
 
@@ -196,15 +196,15 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 ## 导出规则
 
-### 视频与配套文件
+### 视频
 
-每个非空分组输出：
+每个非空分组仅输出一个 MP4 文件：
 
 | 文件 | 内容 |
 | --- | --- |
 | `.mp4` | H.264 视频、AAC 音频，保留原显示方向与画幅，不烧录字幕 |
-| `.srt` | 按拼接后的成片时间重新计时的独立字幕 |
-| `.json` | 源视频路径、所选句子、字词时间戳、源区段和拼接顺序 |
+
+视频导出不会额外生成 SRT 字幕或 JSON 文件。旧版本已经生成的配套文件保留原样，不会自动清理；项目、文稿和分组仍保存在本机数据库中。需要完整文稿时，单独点击“导出文稿”。
 
 组内顺序决定成片顺序。相邻且保持原顺序的原句合并为连续区段，保留中间停顿。为降低切掉字头字尾的风险，边界默认前后预留约 80/120ms，并贴近视频帧边界；这不等于自动精剪。
 
@@ -237,13 +237,13 @@ Git 仓库只保存源码、测试代码、依赖清单、README 和必要的界
 | 音频与识别缓存 | `work/longvideo-editor-data/audio/`、`asr/` | 否 |
 | 项目、文字修正、分组与设置 | `work/longvideo-editor-data/editor.sqlite3` | 否 |
 | 渲染临时文件 | `work/longvideo-editor-data/jobs/` | 否 |
-| MP4 / SRT / JSON | 用户选择的视频输出目录 | 否 |
+| MP4 成片 | 用户选择的视频输出目录 | 否 |
 | TXT 文稿 | 用户选择的文稿输出目录 | 否 |
 | 截图、日志与验证报告 | 本机任务目录或启动控制台 | 否 |
 
 DPAPI 回退文件为本机数据目录中的 `bailian-key.dpapi`。内存方式在服务重启后需要重新填写。程序也支持 `DASHSCOPE_API_KEY` 进程环境变量，但不会自动读取 `.env` 文件。
 
-备份项目时需要同时保存本机数据目录和原视频路径关系。数据库与导出的 JSON、TXT 可能包含原文件路径及文稿内容，应作为自己的业务数据管理。
+备份项目时需要同时保存本机数据目录和原视频路径关系。数据库、TXT 文稿及旧版导出的 JSON 可能包含原文件路径或文稿内容，应作为自己的业务数据管理。
 
 ### 云端调用与预算
 
@@ -262,7 +262,7 @@ $testTemp = Join-Path $workspaceRoot ('work\pytest-' + [guid]::NewGuid().ToStrin
 & "$workspaceRoot\work\longvideo-venv\Scripts\python.exe" -X utf8 -m pytest "$workspaceRoot\outputs\longvideo-editor\tests" -q -p no:cacheprovider --basetemp $testTemp
 ```
 
-当前阶段在 Windows 上通过 **54 项检查**，覆盖分组顺序、字幕映射、边界、文件命名、凭据回退、文件选择、自动转写流程、预算保护、视频与文稿位置保存、TXT 编码与并发防覆盖，以及免安装包资源路径、用户数据隔离和打包后的文件选择命令等。云端响应在自动化测试中模拟，不发起付费识别。
+自动化检查覆盖分组顺序、边界、文件命名、凭据回退、文件选择、自动转写流程、预算保护、视频与文稿位置保存、TXT 编码与并发防覆盖，以及免安装包资源路径、用户数据隔离和打包后的文件选择命令等。视频导出回归检查包括仅生成 MP4、同盘导出、模拟 Windows 跨盘重命名错误、已有文件防覆盖、历史配套文件保留，以及合并失败和取消时清理临时文件。云端响应在自动化测试中模拟，不发起付费识别。
 
 ### 本地音视频集成检查
 
@@ -270,7 +270,7 @@ $testTemp = Join-Path $workspaceRoot ('work\pytest-' + [guid]::NewGuid().ToStrin
 & "$workspaceRoot\work\longvideo-venv\Scripts\python.exe" -X utf8 "$workspaceRoot\outputs\longvideo-editor\tests\verify_local_integration.py"
 ```
 
-该检查使用合成色块、测试音和模拟文稿，验证真实 FFmpeg 导出、片段重排后的画面与音频频率、实际时长、SRT 映射、自定义输出目录和文件读取。数据写入 `work/integration-data/`、`work/integration-exports/`，不调用云转写，也不使用业务视频。
+该检查使用合成色块、测试音和模拟文稿，验证真实 FFmpeg 仅导出 MP4、片段重排后的画面与音频频率、实际时长、自定义输出目录和文件读取。每次使用独立测试目录，数据写入 `work/integration-data/`、`work/integration-exports/`，不调用云转写，也不使用业务视频。
 
 ### 构建 Windows 免安装包
 
@@ -309,6 +309,7 @@ python tools/build_windows.py --ffmpeg 'D:\ffmpeg\bin\ffmpeg.exe' --ffprobe 'D:\
 | 文稿文字不准确 | 使用句子修正功能；ASR 对专名、中英混说、低声字尾和连读可能识别不准，修正文字不会改变原声 |
 | 视频无法在浏览器预览 | 可导入的容器不等于浏览器支持其全部编码；当前主要验证 H.264 口播素材，其他编码需另测 |
 | 导出提示源文件变化 | 原片路径、大小和修改时间参与校验；移动或替换后请重新导入，避免使用旧时间轴 |
+| 导出报 `[WinError 17]` 无法移到不同磁盘 | 更新到 `0.2.0-test.2` 或后续版本后重新导出已有分组，无需重新转写；旧版可临时把导出目录改到缓存所在磁盘 |
 | 更改输出位置后原成片不见了 | 原文件仍在旧目录，列表仅展示当前设置目录；应用不会自动搬迁文件 |
 | 选句时长与成片不完全一致 | 自动边界余量、视频帧对齐和原句间停顿会影响实际时长 |
 
@@ -330,7 +331,7 @@ asr.py                    百炼上传、提交、轮询、结果缓存与云任
 credentials.py            Windows 凭据管理器 / 用户级 DPAPI / 内存回退
 storage.py                SQLite、数据目录和独立输出位置设置
 runtime_paths.py          源码与免安装包的资源、用户数据和 Tcl/Tk 路径
-domain.py                 时间轴、句子身份、片段组合、字幕和安全文件名
+domain.py                 时间轴、句子身份、片段组合和安全文件名
 media.py                  FFprobe、音频提取、FFmpeg 渲染与源文件校验
 transcript_export.py      完整 TXT 文稿与同名防覆盖
 file_picker.py            桌面检测、视频和文件夹选择窗口

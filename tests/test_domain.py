@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from domain import safe_name, choose_names, normalize_transcript, make_item, composition, subtitles
+from domain import safe_name, choose_names, normalize_transcript, make_item, composition
 
 
 def sentence(i, start, text='测试。'):
@@ -15,9 +14,8 @@ def test_reorder_is_not_sorted_back_to_source_time():
     a, b = make_item(sentence(0, 1000)), make_item(sentence(5, 20000))
     spans = composition({'items': [b, a]}, 100000, 25)
     assert spans[0]['start_ms'] > spans[1]['start_ms']
-    srt = subtitles(spans)
-    assert '00:00:00,080' in srt
-    assert '00:00:20,' not in srt
+    assert spans[0]['output_start_ms'] == 0
+    assert spans[1]['output_start_ms'] == spans[0]['duration_ms']
 
 
 def test_contiguous_sentence_pause_preserved_without_merging_reversed():
@@ -48,10 +46,7 @@ def test_repeated_text_retains_distinct_source_identity_and_offset():
     assert composition({'items':[make_item(result[1])]},100000)[0]['start_ms'] > 62000
 
 
-def test_subtitles_use_actual_piece_duration_after_reordering():
-    a, b = make_item(sentence(0, 1000,'第一句。')), make_item(sentence(5,20000,'第二句。'))
-    spans = composition({'items':[b,a]},100000,25)
-    spans[0]['actual_duration_ms'] = 1500
-    srt = subtitles(spans)
-    assert srt.index('第二句。') < srt.index('第一句。')
-    assert '00:00:01,580' in srt
+def test_names_only_reserve_mp4_and_match_case_insensitively():
+    groups = [{'id': '1', 'name': 'Clip'}, {'id': '2', 'name': 'Clip'}]
+    plans = choose_names(groups, ['Clip.srt', 'Clip.json', 'CLIP_02.MP4'])
+    assert [plan['file_name'] for plan in plans] == ['Clip.mp4', 'Clip_03.mp4']

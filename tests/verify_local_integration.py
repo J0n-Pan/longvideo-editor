@@ -1,9 +1,10 @@
-import os,sys,json,time,subprocess,statistics,array
+import os,sys,json,time,subprocess,array,uuid
 from pathlib import Path
 root=Path(__file__).resolve().parents[3]
-os.environ['LONGVIDEO_DATA']=str(root/'work/integration-data')
-os.environ['LONGVIDEO_EXPORTS']=str(root/'work/integration-exports')
-os.environ['LONGVIDEO_TRANSCRIPTS']=str(root/'work/integration-transcripts')
+run=uuid.uuid4().hex[:12]
+os.environ['LONGVIDEO_DATA']=str(root/'work/integration-data'/run)
+os.environ['LONGVIDEO_EXPORTS']=str(root/'work/integration-exports'/run)
+os.environ['LONGVIDEO_TRANSCRIPTS']=str(root/'work/integration-transcripts'/run)
 sys.path.insert(0,str(root/'outputs/longvideo-editor'))
 from media import ffmpeg,probe,render,binaries
 from domain import make_item
@@ -14,7 +15,7 @@ from storage import get,save
 # This local export check must never submit an automatic cloud transcription.
 application.get_key=lambda: ''
 H={'X-Longvideo-Client':'1'}
-folder=root/'work/integration-data';fixture=folder/'fixture.mp4'
+folder=Path(os.environ['LONGVIDEO_DATA']);fixture=folder/'fixture.mp4'
 ffmpeg(['-f','lavfi','-i','color=c=red:s=320x180:r=25:d=4',
         '-f','lavfi','-i','color=c=blue:s=320x180:r=25:d=4',
         '-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=4',
@@ -51,7 +52,7 @@ with TestClient(app,base_url='http://127.0.0.1') as c:
     assert job['status']=='succeeded',job
     result=Path(job['results'][0]['path']);meta=probe(result)
     assert result.parent==destination.resolve(),result
-    assert result.with_suffix('.srt').is_file() and result.with_suffix('.json').is_file()
+    assert list(destination.iterdir())==[result]
     assert abs(meta['duration_ms']-plan[0]['duration_ms'])<100,(meta['duration_ms'],plan)
     def output(args):
         return subprocess.check_output([binaries()['ffmpeg'],'-v','error',*map(str,args)],creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
@@ -65,9 +66,7 @@ with TestClient(app,base_url='http://127.0.0.1') as c:
         frequencies.append(crossings/(len(samples)/48000))
     assert colors[0][2]>colors[0][0]+150 and colors[1][0]>colors[1][2]+150,colors
     assert abs(frequencies[0]-880)<10 and abs(frequencies[1]-440)<10,frequencies
-    srt=result.with_suffix('.srt').read_text(encoding='utf-8-sig')
-    assert srt.index('蓝画面高音')<srt.index('红画面低音')
     assert c.get('/api/exports/'+result.name).status_code==200
-    report={'status':'passed','checks':['origin guard','import','group persistence','custom export folder persistence','MP4 and sidecars in custom folder','invalid bounds rejected','filename normalization','video Range request','background export','duration','reordered decoded colors','reordered audio frequencies','SRT mapping','file download'], 'output_ms':meta['duration_ms'],'planned_ms':plan[0]['duration_ms'],'decoded_colors':colors,'decoded_frequencies':frequencies}
+    report={'status':'passed','checks':['origin guard','import','group persistence','custom export folder persistence','only MP4 in custom folder','invalid bounds rejected','filename normalization','video Range request','background export','duration','reordered decoded colors','reordered audio frequencies','file download'], 'output_ms':meta['duration_ms'],'planned_ms':plan[0]['duration_ms'],'decoded_colors':colors,'decoded_frequencies':frequencies}
     (root/'work/local-integration-result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
     print(json.dumps(report,ensure_ascii=False))

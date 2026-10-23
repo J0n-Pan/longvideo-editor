@@ -1,4 +1,4 @@
-"""Source-time selection, ordered compositions, safe output names and subtitle mapping."""
+"""Source-time selection, ordered compositions and safe output names."""
 import copy
 import math
 import re
@@ -19,9 +19,9 @@ def choose_names(groups, existing):
     for group in groups:
         base = safe_name(group.get('name', ''))
         name, n = base, 2
-        while any((name + ext).casefold() in used for ext in ('.mp4', '.srt', '.json')):
+        while (name + '.mp4').casefold() in used:
             name, n = f'{base}_{n:02d}', n + 1
-        used.update((name + ext).casefold() for ext in ('.mp4', '.srt', '.json'))
+        used.add((name + '.mp4').casefold())
         result.append({'group_id': group['id'], 'name': group['name'], 'file_name': name + '.mp4'})
     return result
 
@@ -109,23 +109,3 @@ def composition(group, duration_ms, fps=25.0):
         span['duration_ms'] = span['end_ms'] - span['start_ms']
         cursor += span['duration_ms']
     return spans
-
-
-def srt_time(ms):
-    ms = max(0, round(ms))
-    return f'{ms // 3600000:02}:{ms // 60000 % 60:02}:{ms // 1000 % 60:02},{ms % 1000:03}'
-
-
-def subtitles(spans):
-    result = []
-    index = 1
-    cursor = 0
-    for span in spans:
-        for item in span['items']:
-            start = max(item['start_ms'], span['start_ms']) - span['start_ms'] + cursor
-            end = min(item['end_ms'], span['end_ms']) - span['start_ms'] + cursor
-            if end > start:
-                result.append(f'{index}\n{srt_time(start)} --> {srt_time(end)}\n{item["text"]}\n')
-                index += 1
-        cursor += span.get('actual_duration_ms', span['duration_ms'])
-    return '\n'.join(result)
