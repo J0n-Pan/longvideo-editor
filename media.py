@@ -10,11 +10,17 @@ from fractions import Fraction
 
 from storage import DATA, TOOLS, export_directory, json_write
 from domain import composition, subtitles, choose_names
+from runtime_paths import is_frozen
 
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 
 def binaries():
+    if is_frozen():
+        bundled = {name: TOOLS / (name + '.exe') for name in ('ffmpeg', 'ffprobe')}
+        if not all(path.is_file() for path in bundled.values()):
+            raise ValueError('程序的音视频资源不完整，请重新完整解压免安装包，不要单独移动 EXE。')
+        return {name: str(path) for name, path in bundled.items()}
     config = TOOLS / 'paths.json'
     if config.exists():
         return json.loads(config.read_text(encoding='utf-8'))

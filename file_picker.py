@@ -49,10 +49,15 @@ def select_directory(initial_directory):
 
 def select_paths(initial_directory, mode):
     require_interactive_desktop()
+    if getattr(sys, 'frozen', False):
+        command = [sys.executable, '--picker-mode', 'directory' if mode == '--directory' else 'video',
+                   '--initial-directory', str(initial_directory)]
+    else:
+        command = [getattr(sys, '_base_executable', sys.executable), '-X', 'utf8',
+                   str(Path(__file__).resolve()), mode, str(initial_directory)]
     try:
         result = subprocess.run(
-            [getattr(sys, '_base_executable', sys.executable), '-X', 'utf8', str(Path(__file__).resolve()),
-             mode, str(initial_directory)],
+            command,
             stdin=subprocess.DEVNULL, capture_output=True, encoding='utf-8',
             errors='replace', timeout=600,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))

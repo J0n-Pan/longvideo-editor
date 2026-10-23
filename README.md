@@ -4,6 +4,8 @@
 
 当前定位是可运行的本机验证版，主要适用于单人口播。云端转写使用阿里云百炼录音模型 `paraformer-v2`；视频预览、项目保存和成片导出在本地完成。
 
+已增加 Windows x64 免安装测试包的构建支持，内置 Python、FFmpeg、FFprobe 和界面资源；用户各自填写自己的百炼 Key。源码部署与免安装包使用独立的默认数据目录。
+
 ```text
 导入原视频 → 提取音频并自动转写 → 从文稿选句
                                   ↓
@@ -17,6 +19,7 @@
 ## 目录
 
 - [当前功能](#当前功能)
+- [Windows 免安装测试包](#windows-免安装测试包)
 - [环境与安装](#环境与安装)
 - [启动工作台](#启动工作台)
 - [使用流程](#使用流程)
@@ -42,7 +45,21 @@
 
 未实现自动剪除气口、口误、语气词和冗余语句。跨原视频混剪、自动选精彩片段、智能裁切和后续精剪也不在当前范围内。
 
+## Windows 免安装测试包
+
+当前包版本为 `0.2.0-test.1`。完整解压 `LongVideoEditor-0.2.0-test.1-windows-x64.zip` 后，双击其中的 `启动工作台.cmd`；浏览器会自动打开工作台。在“设置”中填写自己的百炼 Key，选择输出目录后即可导入素材。无需安装 Python 或 Git。完整说明见 [WINDOWS-QUICKSTART.md](WINDOWS-QUICKSTART.md)。
+
+[下载 Windows x64 测试包（97.8 MB）](https://github.com/J0n-Pan/longvideo-editor/releases/download/v0.2.0-test.1/LongVideoEditor-0.2.0-test.1-windows-x64.zip) · [SHA-256 校验文件](https://github.com/J0n-Pan/longvideo-editor/releases/download/v0.2.0-test.1/LongVideoEditor-0.2.0-test.1-windows-x64.zip.sha256) · [版本说明](https://github.com/J0n-Pan/longvideo-editor/releases/tag/v0.2.0-test.1)
+
+ZIP 是程序文件夹的压缩包，不是单文件安装向导；请完整解压并保留 `_internal`。程序资源随包提供，转写仍需要网络和百炼服务。安装包单独构建，不包含在仓库自动生成的源码 ZIP 中。
+
+免安装包将数据库、缓存和设置放在 `%LOCALAPPDATA%/LongVideoEditor`，默认视频输出在当前用户的 `Videos/LongVideoEditor`，文稿在 `Documents/LongVideoEditor`。更新前退出服务，再完整解压新版，用户数据可继续使用。包内不会附带作者的密钥、素材、项目或导出结果。
+
+免安装版使用独立的 Windows 凭据名称，不会自动继承当前源码测试环境的密钥或项目。需要迁移自己的旧项目时，另行备份并迁移数据，不要把自己的数据库放入分发包。
+
 ## 环境与安装
+
+以下步骤面向源码运行；免安装包用户直接按上面的说明操作。
 
 ### 1. 环境要求
 
@@ -82,7 +99,7 @@ py -3.12 -m venv "$workspaceRoot\work\longvideo-venv"
 & "$workspaceRoot\work\longvideo-venv\Scripts\python.exe" -m pip install -r "$workspaceRoot\outputs\longvideo-editor\requirements-lock.txt"
 ```
 
-仓库当前不是独立安装包。直接克隆到任意层级后运行，可能使默认数据目录和启动脚本指向错误位置。
+源码运行仍依赖上述工作区布局。直接克隆到任意层级后使用源码启动器，可能使默认数据目录和启动脚本指向错误位置；免安装包不依赖这个布局。
 
 ### 3. 配置 FFmpeg 与 FFprobe
 
@@ -245,7 +262,7 @@ $testTemp = Join-Path $workspaceRoot ('work\pytest-' + [guid]::NewGuid().ToStrin
 & "$workspaceRoot\work\longvideo-venv\Scripts\python.exe" -X utf8 -m pytest "$workspaceRoot\outputs\longvideo-editor\tests" -q -p no:cacheprovider --basetemp $testTemp
 ```
 
-当前阶段在 Windows 上通过 **49 项检查**，覆盖分组顺序、字幕映射、边界、文件命名、凭据回退、文件选择、自动转写流程、预算保护、视频与文稿位置保存、TXT 编码与并发防覆盖等。云端响应在自动化测试中模拟，不发起付费识别。
+当前阶段在 Windows 上通过 **54 项检查**，覆盖分组顺序、字幕映射、边界、文件命名、凭据回退、文件选择、自动转写流程、预算保护、视频与文稿位置保存、TXT 编码与并发防覆盖，以及免安装包资源路径、用户数据隔离和打包后的文件选择命令等。云端响应在自动化测试中模拟，不发起付费识别。
 
 ### 本地音视频集成检查
 
@@ -255,6 +272,19 @@ $testTemp = Join-Path $workspaceRoot ('work\pytest-' + [guid]::NewGuid().ToStrin
 
 该检查使用合成色块、测试音和模拟文稿，验证真实 FFmpeg 导出、片段重排后的画面与音频频率、实际时长、SRT 映射、自定义输出目录和文件读取。数据写入 `work/integration-data/`、`work/integration-exports/`，不调用云转写，也不使用业务视频。
 
+### 构建 Windows 免安装包
+
+在 Windows x64 的开发 Python 环境中安装运行依赖和 `requirements-build.in` 中固定的构建工具，然后执行：
+
+```powershell
+python -m pip install -r requirements-lock.txt -r requirements-build.in
+python tools/build_windows.py --ffmpeg 'D:\ffmpeg\bin\ffmpeg.exe' --ffprobe 'D:\ffmpeg\bin\ffprobe.exe'
+```
+
+构建器沿用本仓库的工作区布局，将临时文件放入 `work/portable-build/`，每次生成新的程序目录；ZIP 和 SHA-256 校验文件输出到工作区 `outputs/`。当前 FFmpeg 资源采用 Gyan 构建，构建器要求其 `bin/` 上一级保留原始 `LICENSE`、`README.txt`，并将这些材料随包提供。
+
+构建器使用明确列出的界面资源和 FFmpeg/FFprobe，不收集工作区数据，不打包 `imageio-ffmpeg` 的重复二进制或测试工具。压缩前执行 EXE 自检、检查业务素材和数据库类型文件，并生成程序文件清单。自检不读取密钥、不请求转写；实际分发前仍需其他 Windows 电脑验证系统选择窗口和完整操作流程。
+
 ### 配置入口
 
 | 配置 | 作用 |
@@ -262,6 +292,7 @@ $testTemp = Join-Path $workspaceRoot ('work\pytest-' + [guid]::NewGuid().ToStrin
 | `LONGVIDEO_DATA` | 覆盖本机数据库和缓存目录 |
 | `LONGVIDEO_EXPORTS` | 设置默认视频输出目录 |
 | `LONGVIDEO_TRANSCRIPTS` | 设置默认文稿输出目录 |
+| `LONGVIDEO_PORT` | 桌面入口使用的本机端口，默认 `8765` |
 | `work/longvideo-tools/paths.json` | 指定 FFmpeg、FFprobe 路径 |
 | `version.py` | 桌面启动器识别本机运行版本 |
 
@@ -298,6 +329,7 @@ app.py                    FastAPI 路由、导入、自动转写编排、后台�
 asr.py                    百炼上传、提交、轮询、结果缓存与云任务恢复
 credentials.py            Windows 凭据管理器 / 用户级 DPAPI / 内存回退
 storage.py                SQLite、数据目录和独立输出位置设置
+runtime_paths.py          源码与免安装包的资源、用户数据和 Tcl/Tk 路径
 domain.py                 时间轴、句子身份、片段组合、字幕和安全文件名
 media.py                  FFprobe、音频提取、FFmpeg 渲染与源文件校验
 transcript_export.py      完整 TXT 文稿与同名防覆盖
@@ -305,6 +337,8 @@ file_picker.py            桌面检测、视频和文件夹选择窗口
 desktop_start.py          桌面启动、版本与端口检查、空闲旧服务切换
 static/                   HTML、CSS、原生 JavaScript、个人 logo
 tests/                    自动化检查与本地音视频集成脚本
+tools/build_windows.py    独立运行包构建、资源筛选、自检和 ZIP 压缩
+WINDOWS-QUICKSTART.md      免安装包用户说明
 ```
 
 主要本机接口：

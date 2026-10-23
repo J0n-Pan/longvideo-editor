@@ -1,1 +1,1 @@
-APP_VERSION = '2026-10-21-logo-transcripts'
+APP_VERSION = '0.2.0-test.1'

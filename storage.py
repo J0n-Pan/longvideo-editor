@@ -5,13 +5,12 @@ import sqlite3
 import tempfile
 import threading
 import time
+from runtime_paths import default_layout
 
-APP = Path(__file__).resolve().parent
-ROOT = APP.parents[1]
-DATA = Path(os.environ.get('LONGVIDEO_DATA', ROOT / 'work' / 'longvideo-editor-data'))
-EXPORTS = Path(os.environ.get('LONGVIDEO_EXPORTS', ROOT / 'outputs' / 'short-clips'))
-TRANSCRIPTS = Path(os.environ.get('LONGVIDEO_TRANSCRIPTS', ROOT / 'outputs' / 'transcripts'))
-TOOLS = ROOT / 'work' / 'longvideo-tools'
+_layout = default_layout()
+APP, ROOT = _layout['app'], _layout['root']
+DATA, EXPORTS = _layout['data'], _layout['exports']
+TRANSCRIPTS, TOOLS = _layout['transcripts'], _layout['tools']
 for folder in (DATA, EXPORTS, TRANSCRIPTS, DATA / 'audio', DATA / 'asr', DATA / 'jobs'):
     folder.mkdir(parents=True, exist_ok=True)
 LOCK = threading.RLock()

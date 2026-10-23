@@ -6,7 +6,8 @@ import os
 import sys
 import warnings
 
-TARGET = 'Codex.LongVideoEditor.DashScope.xia'
+TARGET = ('LongVideoEditor.DashScope' if getattr(sys, 'frozen', False)
+          else 'Codex.LongVideoEditor.DashScope.xia')
 _SESSION_KEY = ''
 
 
