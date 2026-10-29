@@ -11,6 +11,7 @@ import threading
 import zipfile
 
 from installer_core import (InstallError, check_package, detected_directory, install_package,
+                            installation_plan, new_install_directory,
                             service_info, sha256, user_data_directory)
 from runtime_paths import configure_tk_resources
 from version import APP_VERSION
@@ -68,9 +69,12 @@ class InstallerWindow:
         from tkinter import ttk
         self.root, self.archive, self.digest, self.version = root, archive, digest, version
         self.events, self.busy = queue.Queue(), False
-        self.directory = tk.StringVar(value=str(target or detected_directory(user_data_directory(), service_info())))
+        self.plan = installation_plan(user_data_directory(), service_info())
+        if target:
+            self.plan['directory'] = Path(target)
+        self.directory = tk.StringVar(value=str(self.plan['directory']))
         self.shortcut, self.open_after = tk.BooleanVar(value=shortcut), tk.BooleanVar(value=open_after)
-        self.status = tk.StringVar(value='选择旧版程序文件夹即可覆盖升级；首次使用可保留默认位置。')
+        self.status = tk.StringVar()
         root.title('长素材选句工作台 · 安装与升级')
         root.configure(background='#f4f6f9')
         root.resizable(False, False)
@@ -99,11 +103,12 @@ class InstallerWindow:
         titles.pack(side='left')
         ttk.Label(titles, text='长素材选句工作台', font=('Microsoft YaHei', 18, 'bold')).pack(anchor='w')
         ttk.Label(titles, text=f'安装与升级 · {version}', foreground='#6e7b89').pack(anchor='w', pady=(4, 0))
-        ttk.Label(container, text='替换旧程序、清理过时文件，继续沿用项目、分组和已保存的密钥。').pack(anchor='w')
-        ttk.Label(container, text='程序位置（升级请选择旧版程序文件夹）').pack(anchor='w', pady=(20, 7))
+        ttk.Label(container, text='更新程序、清理过时文件，继续沿用项目、分组和已保存的密钥。').pack(anchor='w')
+        self.location_label = ttk.Label(container, text='程序位置')
+        self.location_label.pack(anchor='w', pady=(20, 7))
         location = ttk.Frame(container)
         location.pack(fill='x')
-        self.entry = ttk.Entry(location, textvariable=self.directory, width=57, font=('Microsoft YaHei', 10))
+        self.entry = ttk.Entry(location, textvariable=self.directory, width=57, state='readonly', font=('Microsoft YaHei', 10))
         self.entry.pack(side='left', fill='x', expand=True)
         self.browse_button = ttk.Button(location, text='更改', command=self.browse)
         self.browse_button.pack(side='right', padx=(10, 0))
@@ -123,6 +128,7 @@ class InstallerWindow:
         self.install_button.pack(side='right')
         self.close_button = ttk.Button(footer, text='取消', command=self.close)
         self.close_button.pack(side='right', padx=(0, 10))
+        self.apply_plan()
         root.protocol('WM_DELETE_WINDOW', self.close)
         root.update_idletasks()
         width, height = max(680, root.winfo_reqwidth()), max(420, root.winfo_reqheight())
@@ -131,13 +137,40 @@ class InstallerWindow:
         root.after(80, self.poll)
 
     def browse(self):
+        if self.plan['mode'] == 'locate':
+            self.plan = installation_plan(user_data_directory(), service_info())
+            self.directory.set(str(self.plan['directory']))
+            self.apply_plan()
+            return
+        if self.plan['mode'] != 'new':
+            return
         from tkinter import filedialog
         current = Path(self.directory.get())
         initial = next((p for p in (current, *current.parents) if p.is_dir()), Path.home())
-        selected = filedialog.askdirectory(parent=self.root, title='选择旧版程序目录，或选择空文件夹',
+        selected = filedialog.askdirectory(parent=self.root, title='选择安装磁盘或父文件夹',
                                            initialdir=str(initial), mustexist=True)
         if selected:
-            self.directory.set(selected)
+            self.directory.set(str(new_install_directory(selected)))
+
+    def apply_plan(self):
+        mode = self.plan['mode']
+        if mode == 'update':
+            self.location_label.configure(text='已安装位置（自动原位更新）')
+            self.browse_button.pack_forget()
+            self.install_button.configure(text='更新到 ' + self.version)
+            self.install_button.state(['!disabled'])
+            self.status.set('已识别旧版，点击更新即可。项目、缓存、导出位置和已保存密钥继续使用。')
+        elif mode == 'locate':
+            self.location_label.configure(text='检测到已有用户数据，正在等待识别旧版程序')
+            self.browse_button.configure(text='重新检测')
+            self.install_button.state(['disabled'])
+            self.status.set('旧 ZIP 版本未记录安装位置。请先打开旧工作台，再点击“重新检测”，即可在原位置更新。')
+        else:
+            self.location_label.configure(text='首次安装位置')
+            self.browse_button.configure(text='更改')
+            self.install_button.configure(text='安装')
+            self.install_button.state(['!disabled'])
+            self.status.set('选择磁盘或父文件夹后，会安装到其中的 LongVideoEditor 子目录；可保留默认位置。')
 
     def close(self):
         if self.busy:
@@ -147,6 +180,8 @@ class InstallerWindow:
             self.root.destroy()
 
     def start(self):
+        if self.plan['mode'] == 'locate':
+            return
         target = self.directory.get()
         self.busy = True
         for widget in [self.entry, self.browse_button, self.install_button, self.close_button, *self.checks]:

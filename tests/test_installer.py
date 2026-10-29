@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from installer_core import InstallError, install_package, sha256, validate_target
+from installer_core import installation_plan, new_install_directory
 
 
 def package(tmp_path, version, *, extra=None):
@@ -210,3 +211,36 @@ def test_bundled_public_ca_store_is_preserved_but_private_pem_is_not_managed(tmp
     invalid, _ = package(tmp_path, '0.2.0-test.6', extra={'_internal/private.pem':b'private'})
     with pytest.raises(InstallError, match='用户数据类型'):
         upgrade(invalid, tmp_path / 'other-app', tmp_path / 'data')
+
+
+def test_recorded_installation_is_always_an_in_place_update(tmp_path):
+    _, files = package(tmp_path, '0.2.0-test.6')
+    target, data = tmp_path / 'old-program', tmp_path / 'user-data'
+    put_old(target, files)
+    data.mkdir()
+    (data / 'installation.json').write_text(json.dumps({'app_id':'longvideo-editor','directory':str(target)}))
+    plan = installation_plan(data, environment={'LOCALAPPDATA':str(tmp_path / 'Local')})
+    assert plan == {'mode':'update','directory':target.resolve()}
+
+
+def test_legacy_running_zip_is_detected_without_a_location_choice(tmp_path):
+    _, files = package(tmp_path, '0.2.0-test.5')
+    target = tmp_path / 'legacy-zip';put_old(target, files)
+    plan = installation_plan(tmp_path / 'user-data', {'app_id':'longvideo-editor','app_root':str(target / '_internal')},
+                             environment={'LOCALAPPDATA':str(tmp_path / 'Local')})
+    assert plan['mode']=='update' and plan['directory']==target.resolve()
+
+
+def test_unlocated_old_user_must_be_detected_before_cleanup(tmp_path):
+    data=tmp_path/'user-data';data.mkdir();(data/'editor.sqlite3').write_bytes(b'opaque existing data')
+    plan=installation_plan(data,environment={'LOCALAPPDATA':str(tmp_path/'Local')})
+    assert plan['mode']=='locate'
+
+
+def test_first_install_can_use_another_disk_parent_without_cleaning_it(tmp_path):
+    parent=tmp_path/'D-drive';parent.mkdir();(parent/'personal.txt').write_bytes(b'keep')
+    selected=new_install_directory(parent)
+    assert selected==parent/'LongVideoEditor' and new_install_directory(selected)==selected
+    archive,expected=package(tmp_path,'0.3.0-test.1')
+    upgrade(archive,selected,tmp_path/'C-user-data')
+    assert tree(selected)==expected and (parent/'personal.txt').read_bytes()==b'keep'

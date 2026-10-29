@@ -146,19 +146,50 @@ def validate_target(target, user_data):
     return target
 
 
-def detected_directory(user_data, service=None):
+def existing_installation(user_data, service=None, *, environment=None):
+    environment = os.environ if environment is None else environment
     record = Path(user_data) / 'installation.json'
+    candidates = []
     try:
         saved = json.loads(record.read_text(encoding='utf-8'))
-        if saved.get('app_id') == APP_ID and (Path(saved['directory']) / MANIFEST).is_file():
-            return Path(saved['directory'])
+        if saved.get('app_id') == APP_ID:
+            candidates.append(Path(saved['directory']))
     except (OSError, ValueError, KeyError):
         pass
     if service and service.get('app_id') == APP_ID:
-        candidate = Path(service.get('app_root', '')).parent
-        if (candidate / MANIFEST).is_file() and (candidate / 'LongVideoEditor.exe').is_file():
-            return candidate
-    return Path(os.environ.get('LOCALAPPDATA') or Path.home() / 'AppData/Local') / 'Programs/LongVideoEditor'
+        candidates.append(Path(service.get('app_root', '')).parent)
+    candidates.append(Path(environment.get('LOCALAPPDATA') or Path.home() / 'AppData/Local') / 'Programs/LongVideoEditor')
+    for candidate in candidates:
+        try:
+            if candidate.is_absolute() and (candidate / 'LongVideoEditor.exe').is_file():
+                read_manifest(json.loads((candidate / MANIFEST).read_text(encoding='utf-8')))
+                return candidate.resolve()
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return None
+
+
+def detected_directory(user_data, service=None):
+    return existing_installation(user_data, service) or (
+        Path(os.environ.get('LOCALAPPDATA') or Path.home() / 'AppData/Local') / 'Programs/LongVideoEditor')
+
+
+def installation_plan(user_data, service=None, *, environment=None):
+    environment = os.environ if environment is None else environment
+    found = existing_installation(user_data, service, environment=environment)
+    if found:
+        return {'mode': 'update', 'directory': found}
+    default = Path(environment.get('LOCALAPPDATA') or Path.home() / 'AppData/Local') / 'Programs/LongVideoEditor'
+    # Old ZIPs may have user data but no installation record. Never guess which folder to clean.
+    mode = 'locate' if (Path(user_data) / 'editor.sqlite3').is_file() else 'new'
+    return {'mode': mode, 'directory': default}
+
+
+def new_install_directory(parent):
+    parent = Path(parent).expanduser()
+    if not parent.is_absolute():
+        raise InstallError('请选择本机磁盘或文件夹。')
+    return parent if parent.name.casefold() == 'longvideoeditor' else parent / 'LongVideoEditor'
 
 
 def service_request(method, path, port=SERVICE_PORT):

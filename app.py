@@ -14,10 +14,11 @@ from starlette.concurrency import run_in_threadpool
 import asr
 from credentials import get_key, set_key, key_storage
 from file_picker import select_video_files, select_directory, desktop_picker_ready
-from domain import composition, normalize_transcript, choose_names
+from domain import composition, mixed_composition, normalize_transcript, choose_names
+import edit_projects as edits
 from segmentation import refine_project, SEGMENTATION_REVISION
-from media import probe, extract_audio, render, verify_source
-from storage import (APP, LOCK, all_objects, get, save, update_job,
+from media import probe, extract_audio, render, render_mixed, verify_source
+from storage import (APP, LOCK, all_objects, asset_summaries, get, save, update_job,
                      export_directory, set_export_directory, transcript_directory,
                      set_transcript_directory)
 from transcript_export import export_transcript
@@ -56,6 +57,11 @@ async def missing(request, exc):
 @app.exception_handler(ValueError)
 async def invalid(request, exc):
     return JSONResponse({'detail': asr.clean(exc)}, status_code=400)
+
+
+@app.exception_handler(edits.EditConflict)
+async def edit_conflict(request, exc):
+    return JSONResponse({'detail': str(exc)}, status_code=409)
 
 
 @app.get('/')
@@ -142,11 +148,12 @@ def credentials_check():
 
 @app.get('/api/projects')
 def projects():
-    return [{k: p.get(k) for k in ('id', 'name', 'path', 'media', 'asr_status', 'updated_at')}
-            for p in all_objects('project')]
+    return asset_summaries()
 
 
-def import_paths(paths):
+def import_paths(paths, edit_id=None):
+    if edit_id is not None:
+        get('edit', edit_id)
     files, seen = [], set()
     for value in paths:
         path = Path(str(value)).expanduser().resolve()
@@ -179,6 +186,8 @@ def import_paths(paths):
         results.append(project)
     for project in pending:
         save('project', project)
+    if edit_id is not None:
+        edits.set_assets(edit_id, [p['id'] for p in results], append=True)
     return [{**project, 'auto_transcription': auto_transcribe_project(project['id'])}
             for project in results]
 
@@ -186,7 +195,7 @@ def import_paths(paths):
 @app.post('/api/import')
 async def import_source(request: Request):
     data = await request.json()
-    return await run_in_threadpool(import_paths, [data.get('path', '')])
+    return await run_in_threadpool(import_paths, [data.get('path', '')], data.get('edit_id'))
 
 
 @app.post('/api/import/pick')
@@ -203,7 +212,7 @@ async def pick_and_import_source(request: Request):
             raise HTTPException(409, '文件选择窗口已经打开，请先完成选择。')
         try:
             paths = select_video_files(initial_directory)
-            return import_paths(paths) if paths else []
+            return import_paths(paths, data.get('edit_id')) if paths else []
         finally:
             picker_lock.release()
 
@@ -260,6 +269,16 @@ async def correct_sentence(pid: str, sid: str, request: Request):
                 if item['id'] == sid:
                     item['text'] = text
         save('project', p)
+        # Corrections belong to the shared transcript; source times and edit cuts stay independent.
+        for edit in all_objects('edit'):
+            changed = False
+            for group in edit['groups']:
+                for item in group['items']:
+                    if item.get('asset_id') == pid and item['id'] == sid:
+                        item['text'] = text
+                        changed = True
+            if changed:
+                edits.write_edit(edit)
     return {'saved': True}
 
 
@@ -453,6 +472,84 @@ def recover():
                     save('transcript_backup', {'id': backup_id, 'project': project,
                                               'created_at': time.time()})
                 save('project', upgraded)
+    edits.migrate_legacy()
+
+
+@app.get('/api/edits')
+def editing_projects():
+    edits.migrate_legacy()
+    return [{k: e[k] for k in ('id', 'name', 'asset_ids', 'revision', 'updated_at')}
+            for e in all_objects('edit')]
+
+
+@app.post('/api/edits')
+async def create_edit(request: Request):
+    return edits.create_edit((await request.json()).get('name'))
+
+
+@app.get('/api/edits/{eid}')
+def editing_project(eid: str):
+    return get('edit', eid)
+
+
+@app.put('/api/edits/{eid}')
+async def save_edit(eid: str, request: Request):
+    return edits.update_edit(eid, await request.json())
+
+
+@app.put('/api/edits/{eid}/assets')
+async def save_edit_assets(eid: str, request: Request):
+    data = await request.json()
+    return edits.set_assets(eid, data.get('asset_ids'), data.get('revision'))
+
+
+def edit_export_snapshot(eid, ids):
+    with LOCK:
+        edit = get('edit', eid)
+        groups = edits.selected_groups(edit, ids)
+        sources = edits.sources_for(edit, groups)
+    for source in sources.values():
+        try:
+            verify_source(source)
+        except ValueError as error:
+            raise ValueError(f'素材「{source["name"]}」：{error}') from None
+        if source['media'].get('color_transfer') in ('smpte2084', 'arib-std-b67'):
+            raise ValueError(f'素材「{source["name"]}」为 HDR，当前混剪需使用 SDR 素材。')
+    return edit, groups, sources
+
+
+@app.post('/api/edits/{eid}/export-plan')
+async def mixed_export_plan(eid: str, request: Request):
+    edit, groups, sources = edit_export_snapshot(eid, (await request.json()).get('group_ids'))
+    plans = choose_names(groups, [f.name for f in export_directory().iterdir()])
+    return [{**plan, 'duration_ms': sum(s['duration_ms'] for s in mixed_composition(g, sources)),
+             'sentence_count': len(g['items']), 'source_count': len({i['asset_id'] for i in g['items']}),
+             'output': g['output']} for g, plan in zip(groups, plans)]
+
+
+@app.post('/api/edits/{eid}/preview-plan')
+async def mixed_preview_plan(eid: str, request: Request):
+    edit, groups, sources = edit_export_snapshot(eid, (await request.json()).get('group_ids'))
+    return [{'group_id': g['id'], 'spans': mixed_composition(g, sources)} for g in groups]
+
+
+@app.post('/api/edits/{eid}/export')
+async def mixed_export(eid: str, request: Request):
+    edit, groups, sources = edit_export_snapshot(eid, (await request.json()).get('group_ids'))
+    if not groups:
+        raise ValueError('没有可导出的非空分组')
+    groups, sources = copy.deepcopy(groups), copy.deepcopy(sources)
+    destination = export_directory()
+    def operation(jid, cancel):
+        def progress(value, text, results=None):
+            changes = {'progress': value, 'message': text}
+            if results is not None:
+                changes['results'] = results
+            update_job(jid, **changes)
+        return render_mixed(sources, groups, jid, progress, cancel, output_directory=destination)
+    return enqueue('export', 'edit:' + eid,
+                   {'group_ids': [g['id'] for g in groups], 'exports_path': str(destination)}, operation,
+                   edit_id=eid, edit_name=edit['name'])
 
 
 @app.post('/api/shutdown')

@@ -120,3 +120,26 @@ def test_failed_or_cancelled_merge_removes_partial_output(export_case, monkeypat
         media.render(project, [group], 'test', cancel=cancel, output_directory=destination)
     assert list(destination.iterdir()) == []
     assert list(cache.iterdir()) == []
+
+
+def test_mixed_export_keeps_source_order_and_quantizes_each_span_to_output_frames(export_case, monkeypatch):
+    project, group, cache, destination, outputs = export_case
+    other = {**project, 'id': 'other', 'media': {**project['media'], 'fps': 30, 'fps_fraction': '30'}}
+    first = {**group['items'][0], 'asset_id': project['id']}
+    second = {**first, 'asset_id': 'other', 'start_ms': 500, 'end_ms': 1300, 'source_index': 1}
+    mixed = {**group, 'items': [first, second, {**first, 'start_ms': 2500, 'end_ms': 3300}],
+             'output': {'width': 180, 'height': 320, 'fps_fraction': '30'}}
+    calls = []
+    encode = media.ffmpeg
+    def record(args, duration_s, *extra):
+        calls.append((args, duration_s))
+        return encode(args, duration_s, *extra)
+    monkeypatch.setattr(media, 'ffmpeg', record)
+    media.render_mixed({project['id']: project, 'other': other}, [mixed], 'mixed', output_directory=destination)
+    parts = [(args, duration) for args, duration in calls if Path(args[-1]).suffix == '.mov']
+    assert len(parts) == 3
+    for args, duration in parts:
+        assert abs(duration * 30 - round(duration * 30)) < 1e-6
+        assert args[args.index('-r') + 1] == '30'
+        assert 'pad=180:320' in args[args.index('-vf') + 1]
+    assert calls[-1][0][calls[-1][0].index('-c:v') + 1] == 'copy'

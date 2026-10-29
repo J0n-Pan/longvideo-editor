@@ -44,6 +44,15 @@ def all_objects(kind):
     return [json.loads(r[0]) for r in rows]
 
 
+def asset_summaries():
+    # Project bodies contain word timestamps; list metadata without loading every transcript.
+    fields = ('id', 'name', 'path', 'media', 'asr_status', 'updated_at')
+    columns = ','.join(f"json_extract(data,'$.{field}')" for field in fields)
+    with connection() as c:
+        rows = c.execute(f"SELECT {columns} FROM objects WHERE kind='project' ORDER BY rowid DESC").fetchall()
+    return [{**dict(zip(fields, row)), 'media': json.loads(row[3]) if row[3] else None} for row in rows]
+
+
 def export_directory(check=True):
     return output_directory('exports_path', EXPORTS, check)
 

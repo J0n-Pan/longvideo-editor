@@ -3,6 +3,7 @@ import copy
 import math
 import re
 import uuid
+from fractions import Fraction
 from segmentation import split_tokens, token_text
 
 
@@ -76,8 +77,20 @@ def make_item(sentence):
 
 
 def composition(group, duration_ms, fps=25.0):
+    return _composition(group, lambda item: (duration_ms, fps))
+
+
+def mixed_composition(group, sources):
+    def timing(item):
+        media = sources[item['asset_id']]['media']
+        return media['duration_ms'], media['fps']
+    return _composition(group, timing)
+
+
+def _composition(group, timing):
     spans = []
     for item in group.get('items', []):
+        duration_ms, fps = timing(item)
         start = max(0, int(item['start_ms']) - 80)
         end = min(duration_ms, int(item['end_ms']) + 120)
         if end <= start:
@@ -85,7 +98,8 @@ def composition(group, duration_ms, fps=25.0):
         if spans:
             prev = spans[-1]
             last = prev['items'][-1]
-            consecutive = (item.get('version') == last.get('version') and
+            consecutive = (item.get('asset_id') == last.get('asset_id') and
+                           item.get('version') == last.get('version') and
                            item.get('source_index') == last.get('source_index', -2) + 1 and
                            item['start_ms'] >= last['start_ms'] and
                            not item.get('edited') and not last.get('edited'))
@@ -93,9 +107,11 @@ def composition(group, duration_ms, fps=25.0):
                 prev['end_ms'] = max(prev['end_ms'], end)
                 prev['items'].append(copy.deepcopy(item))
                 continue
-        spans.append({'start_ms': start, 'end_ms': end, 'items': [copy.deepcopy(item)]})
+        spans.append({'start_ms': start, 'end_ms': end, 'items': [copy.deepcopy(item)],
+                      **({'asset_id': item['asset_id']} if 'asset_id' in item else {})})
     cursor = 0
     for span in spans:
+        duration_ms, fps = timing(span['items'][0])
         # Source frame boundaries are recorded explicitly; all UI data stays in source milliseconds.
         span['start_ms'] = math.floor(span['start_ms'] / 1000 * fps) / fps * 1000
         span['end_ms'] = min(duration_ms, math.ceil(span['end_ms'] / 1000 * fps) / fps * 1000)
@@ -103,3 +119,25 @@ def composition(group, duration_ms, fps=25.0):
         span['duration_ms'] = span['end_ms'] - span['start_ms']
         cursor += span['duration_ms']
     return spans
+
+
+def default_output(media):
+    width = int(media.get('display_width') or media.get('width') or 1920)
+    height = int(media.get('display_height') or media.get('height') or 1080)
+    return validate_output({'width': max(2, width // 2 * 2), 'height': max(2, height // 2 * 2),
+                            'fps_fraction': media.get('fps_fraction') or str(media.get('fps') or 25)})
+
+
+def validate_output(value):
+    if not isinstance(value, dict):
+        raise ValueError('输出规格无效')
+    width, height = value.get('width'), value.get('height')
+    if any(type(x) is not int or x < 2 or x > 7680 or x % 2 for x in (width, height)):
+        raise ValueError('输出宽高需为 2–7680 之间的偶数')
+    try:
+        fps = Fraction(str(value.get('fps_fraction', '')))
+    except (ValueError, ZeroDivisionError):
+        raise ValueError('输出帧率无效') from None
+    if not 1 <= fps <= 120:
+        raise ValueError('输出帧率需在 1–120 fps 之间')
+    return {'width': width, 'height': height, 'fps_fraction': str(fps), 'fit': 'pad'}

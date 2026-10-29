@@ -1,4 +1,6 @@
 import hashlib
+import copy
+import math
 import json
 import os
 from pathlib import Path
@@ -8,7 +10,7 @@ import tempfile
 from fractions import Fraction
 
 from storage import DATA, TOOLS, export_directory
-from domain import composition, choose_names
+from domain import mixed_composition, choose_names, default_output, validate_output
 from runtime_paths import is_frozen
 
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -133,19 +135,32 @@ def sha256(path):
 
 
 def render(project, groups, job_id, progress=None, cancel=None, output_directory=None):
-    verify_source(project)
+    groups = copy.deepcopy(groups)
+    for group in groups:
+        group.setdefault('output', default_output(project['media']))
+        for item in group['items']:
+            item['asset_id'] = project['id']
+    return render_mixed({project['id']: project}, groups, job_id, progress, cancel, output_directory)
+
+
+def render_mixed(sources, groups, job_id, progress=None, cancel=None, output_directory=None):
+    for source in sources.values():
+        verify_source(source)
+        if source['media'].get('color_transfer') in ('smpte2084', 'arib-std-b67'):
+            raise ValueError('检测到HDR素材，需要单独配置色彩处理后再导出')
     destination = Path(output_directory) if output_directory is not None else export_directory()
     if not destination.is_dir():
         raise ValueError('导出目录不存在，请在设置中重新保存路径。')
     plans = choose_names(groups, [p.name for p in destination.iterdir()])
     results = []
-    fps = project['media']['fps']
-    if project['media'].get('color_transfer') in ('smpte2084', 'arib-std-b67'):
-        raise ValueError('检测到HDR素材，需要单独配置色彩处理后再导出')
     for gidx, (group, plan) in enumerate(zip(groups, plans)):
-        spans = composition(group, project['media']['duration_ms'], fps)
+        spans = mixed_composition(group, sources)
         if not spans:
             continue
+        profile = validate_output(group.get('output') or default_output(sources[spans[0]['asset_id']]['media']))
+        width, height = profile['width'], profile['height']
+        filters = (f'scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1,'
+                   f'pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1')
         # Keep the final MP4 on the destination volume so publishing it with
         # rename also works when the job cache and export folder use different drives.
         with (tempfile.TemporaryDirectory(prefix='render_', dir=DATA / 'jobs') as td,
@@ -153,17 +168,25 @@ def render(project, groups, job_id, progress=None, cancel=None, output_directory
             folder = Path(td)
             parts = []
             for i, span in enumerate(spans):
+                project = sources[span['asset_id']]
+                verify_source(project)
                 if cancel and cancel.is_set():
                     raise InterruptedError('任务已取消，已完成文件保留')
-                part = folder / f'{i:05d}.mkv'
-                dur = span['duration_ms'] / 1000
+                # MOV retains sub-millisecond video timestamps; Matroska's default
+                # millisecond clock can introduce small gaps when mixing frame rates.
+                part = folder / f'{i:05d}.mov'
+                output_fps = float(Fraction(profile['fps_fraction']))
+                frame_count = max(1, math.ceil(span['duration_ms'] / 1000 * output_fps - 1e-7))
+                dur = frame_count / output_fps
                 def advance(p):
                     if progress:
                         progress((gidx + (i + p) / (len(spans) + 1)) / len(groups),
                                  f'正在导出 {group["name"]}，区段 {i+1}/{len(spans)}')
                 ffmpeg(['-ss', span['start_ms'] / 1000, '-i', project['path'], '-t', dur,
                         '-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-preset', 'veryfast',
-                        '-crf', '18', '-pix_fmt', 'yuv420p', '-r', project['media']['fps_fraction'],
+                        '-crf', '18', '-pix_fmt', 'yuv420p', '-vf',
+                        filters + f",fps={profile['fps_fraction']},tpad=stop_mode=clone:stop_duration=1",
+                        '-r', profile['fps_fraction'],
                         '-fps_mode', 'cfr', '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2',
                         '-af', f'apad=whole_dur={dur:.6f}', part], dur, advance, cancel)
                 info = probe(part)
