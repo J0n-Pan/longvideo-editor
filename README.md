@@ -4,9 +4,9 @@
 
 **Windows x64 · 本机剪辑 · 百炼云转写**
 
-[下载 Windows 免安装包](https://github.com/J0n-Pan/longvideo-editor/releases/download/v0.2.0-test.5/LongVideoEditor-0.2.0-test.5-windows-x64.zip) · [版本与校验文件](https://github.com/J0n-Pan/longvideo-editor/releases) · [使用说明](WINDOWS-QUICKSTART.md)
+[下载 Windows 安装包](https://github.com/J0n-Pan/longvideo-editor/releases/download/v0.2.0-test.6/LongVideoEditor-0.2.0-test.6-windows-x64-setup.exe) · [版本与校验文件](https://github.com/J0n-Pan/longvideo-editor/releases) · [使用说明](WINDOWS-QUICKSTART.md)
 
-当前测试版：`v0.2.0-test.5`，约 **97.8 MB**。已内置 Python、FFmpeg 和 FFprobe，无需另装运行环境。
+当前测试版：`v0.2.0-test.6`，单文件安装／升级，内置 Python、FFmpeg 和 FFprobe，无需另装运行环境。
 
 ## 主要功能
 
@@ -17,8 +17,8 @@
 
 ## 开始使用
 
-1. 下载并**完整解压**免安装包，保留整个程序文件夹。
-2. 双击 `启动工作台.vbs`，浏览器会自动打开工作台，无需保留命令窗口。
+1. 运行安装 EXE；升级时选择旧版程序目录，替换程序并继承已有数据。
+2. 使用桌面快捷方式或 `启动工作台.vbs` 打开工作台，无需保留命令窗口。
 3. 打开“设置”，填写**自己的百炼 API Key**，选择视频和文稿的导出位置。
 4. 点击“导入素材”，等待转写完成，再从文稿中勾选需要的句子。
 5. 将句子加入分组，调整名称、顺序和边界，预览后导出当前组或全部组。
@@ -39,7 +39,7 @@
 
 ## 详细文档
 
-- [Windows 使用说明](WINDOWS-QUICKSTART.md)：安装包启动、数据位置、升级与排错。
+- [Windows 使用说明](WINDOWS-QUICKSTART.md)：安装、覆盖升级、数据继承与排错。
 - [开发说明](docs/DEVELOPMENT.md)：源码部署、详细行为、测试、打包和接口。
 
 项目自身的许可证尚待确定。第三方依赖与许可见[依赖清单](dependency-manifest.json)，程序包内附第三方许可材料。

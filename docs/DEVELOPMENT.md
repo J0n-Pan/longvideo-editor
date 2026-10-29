@@ -2,7 +2,7 @@
 
 本文包含源码部署、工作流程、导出规则、数据存储、测试、打包和本机接口的详细说明。
 
-返回[项目首页](../README.md)。免安装包用户请先阅读 [Windows 使用说明](../WINDOWS-QUICKSTART.md)。
+返回[项目首页](../README.md)。安装包用户请先阅读 [Windows 使用说明](../WINDOWS-QUICKSTART.md)。
 
 ## 源码版与免安装包
 
@@ -229,13 +229,14 @@ $testTemp = Join-Path $workspaceRoot ('work\pytest-' + [guid]::NewGuid().ToStrin
 
 该检查使用合成色块、测试音和模拟文稿，验证真实 FFmpeg 仅导出 MP4、片段重排后的画面与音频频率、实际时长、自定义输出目录和文件读取。每次使用独立测试目录，数据写入 `work/integration-data/`、`work/integration-exports/`，不调用云转写，也不使用业务视频。
 
-### 构建 Windows 免安装包
+### 构建 Windows 程序包与安装器
 
 在 Windows x64 的开发 Python 环境中安装运行依赖和 `requirements-build.in` 中固定的构建工具，然后执行：
 
 ```powershell
 python -m pip install -r requirements-lock.txt -r requirements-build.in
 python tools/build_windows.py --ffmpeg 'D:\ffmpeg\bin\ffmpeg.exe' --ffprobe 'D:\ffmpeg\bin\ffprobe.exe'
+python tools/build_installer.py
 ```
 
 构建器沿用本仓库的工作区布局，将临时文件放入 `work/portable-build/`，每次生成新的程序目录；ZIP 和 SHA-256 校验文件输出到工作区 `outputs/`。当前 FFmpeg 资源采用 Gyan 构建，构建器要求其 `bin/` 上一级保留原始 `LICENSE`、`README.txt`，并将这些材料随包提供。
@@ -254,6 +255,23 @@ python tools/build_windows.py --ffmpeg 'D:\ffmpeg\bin\ffmpeg.exe' --ffprobe 'D:\
 | `version.py` | 桌面启动器识别本机运行版本 |
 
 界面中已经保存的视频、文稿输出位置优先于对应环境变量的默认值。现有服务修改 Python 后端后需要重新加载；在后台任务空闲时双击 `start.cmd`，启动器按版本检查是否切换。界面静态文件修改后刷新浏览器。
+
+## 本机性能参考
+
+2026-10-29 对 `0.2.0-test.6` 安装版程序进行隔离实测：i5-11300H（8 逻辑处理器）、约 16 GB 内存；素材 20 分 34 秒、8.76 GB，显示分辨率 1080×1920、59.94 fps，缓存文稿 426 句。测试未重新调用云转写，用户原项目保持原样。
+
+| 场景 | 后台进程内存 | 独立 Edge 浏览器内存 | 耗时与 CPU |
+| --- | --- | --- | --- |
+| 后台空闲 | 约 76 MiB | 未启动 | CPU 接近 0 |
+| 文稿加载、视频暂停 | 约 79 MiB | 约 690 MiB | 20 次项目读取的中位耗时约 78 ms |
+| 原片预览播放 | 约 80 MiB | 约 850 MiB | 本次 5 秒预览正常播放 |
+| 导出 9.38 秒切片 | 峰值约 576 MiB，含 FFmpeg | 约 850 MiB | 约 6 秒，后台平均 CPU 约 42% |
+| 导出 70.37 秒切片 | 峰值约 584 MiB，含 FFmpeg | 约 711 MiB（中位值） | 约 47 秒，后台平均 CPU 约 65% |
+| 导出结束后 | 约 82 MiB | 约 702 MiB | 后台 CPU 接近 0 |
+
+内存以每 150 ms 抽样的进程工作集计，MiB 为 2²⁰ 字节；多进程相加可能重复计算共享页。浏览器使用无扩展的独立无头 Edge，包含其相关进程，正常桌面浏览器及已有标签页会改变占用；GPU 显存未计入。CPU 百分比按整机全部逻辑处理器归一化。这是两次导出和短时预览的结果，尚未进行长期内存泄漏、4K 或多小时文稿压力测试。
+
+当前导出使用 CPU 的 `libx264 / veryfast / CRF 18`，尚无硬件编码选项；后台作业串行执行。原视频按需读取，不会将整条素材装入内存。音频与 ASR 结果会在磁盘保留，尚无自动清理界面；当前 64 kbps 单声道识别音频每小时约 28.8 MB，另外还需转写结果和导出时的中间文件空间。多小时文稿会一次加载并渲染全部句子，尚未实现列表虚拟化。
 
 ## 常见问题与限制
 
@@ -296,8 +314,11 @@ file_picker.py            桌面检测、视频和文件夹选择窗口
 desktop_start.py          桌面启动、版本与端口检查、空闲旧服务切换
 static/                   HTML、CSS、原生 JavaScript、个人 logo
 tests/                    自动化检查与本地音视频集成脚本
+installer_core.py         文件清单校验、旧版停止、原目录替换、失败回滚和数据保护
+setup_main.py             单文件安装升级界面、目录识别与快捷方式
 tools/build_windows.py    独立运行包构建、资源筛选、自检和 ZIP 压缩
-WINDOWS-QUICKSTART.md      免安装包用户说明
+tools/build_installer.py  内嵌已验证程序 ZIP、生成单文件安装升级 EXE
+WINDOWS-QUICKSTART.md      Windows 安装与升级说明
 ```
 
 主要本机接口：
@@ -326,3 +347,11 @@ WINDOWS-QUICKSTART.md      免安装包用户说明
 项目自身的开源许可证尚待作者确定。个人 logo 为项目界面资源。
 
 接口参考：[百炼录音 REST API](https://help.aliyun.com/zh/model-studio/paraformer-recorded-speech-recognition-restful-api)、[临时音频上传](https://help.aliyun.com/zh/model-studio/get-temporary-file-url)、[Windows 用户级 DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata)。
+
+## 安装与升级实现
+
+安装器使用独立的单文件运行环境，将经 SHA-256 校验的程序 ZIP 准备到目标磁盘的临时目录，再按旧版文件清单备份和替换程序。已知过时程序文件和旧 CMD 入口会移出活动目录；未知个人文件保留，新文件与个人文件重名时拒绝覆盖。验证新版 EXE 自检成功后才清理原程序备份。普通异常发生时恢复旧程序，被修改过的程序文件另行保留副本。
+
+用户数据目录与 Windows 凭据名称不变。安装器在用户数据目录保存 installation.json 以记录下次升级位置，不读取项目数据库或解密密钥。旧 ZIP 没有安装位置记录且未运行时，用户需选择旧程序目录。默认按当前用户安装；源代码工作区的数据和密钥命名与安装版独立。
+
+安装器的内部验证模式支持 --self-check --report、--install --target --report，用于在隔离目录验证安装和升级；发布 EXE 只接受内嵌载荷。自动检查使用合成数据和复制的旧版包，不操作作者实际的安装目录或凭据。
