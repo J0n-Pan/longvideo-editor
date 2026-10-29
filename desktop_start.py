@@ -1,11 +1,13 @@
 """User-launched desktop entry point; do not relocate sandbox processes."""
 import argparse
+from contextlib import contextmanager
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
 import subprocess
 import sys
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -28,12 +30,83 @@ def running_service():
         return None
 
 
-def open_when_ready():
-    for _ in range(50):
-        if running_service():
+@contextmanager
+def instance_lock(path):
+    import msvcrt
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a+b') as handle:
+        if handle.tell() == 0:
+            handle.write(b'\0')
+            handle.flush()
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            raise ValueError('工作台正在启动，请稍后再次打开。') from None
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def report_error(error):
+    if os.name == 'nt':
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, str(error), '长素材选句工作台', 0x10 | 0x10000)
+    else:
+        print(error, file=sys.stderr)
+
+
+def launch_background():
+    from storage import DATA
+    log = DATA / 'logs' / 'workbench.log'
+    log.parent.mkdir(parents=True, exist_ok=True)
+    command = ([sys.executable, '--background-worker'] if getattr(sys, 'frozen', False)
+               else [sys.executable, '-X', 'utf8', str(APP / 'desktop_start.py'), '--background-worker'])
+    process = subprocess.Popen(
+        command, cwd=APP, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, close_fds=True,
+        creationflags=(getattr(subprocess, 'CREATE_NO_WINDOW', 0) |
+                       getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)))
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        existing = running_service()
+        if (existing and existing.get('app_id') == 'longvideo-editor' and
+                existing.get('app_root') == str(APP) and
+                existing.get('app_version') == APP_VERSION and existing.get('background_running')):
             webbrowser.open(URL)
-            return
+            return 0
+        if process.poll() is not None:
+            raise ValueError(f'后台启动失败，请查看日志：{log}')
         time.sleep(0.2)
+    raise ValueError(f'后台启动尚未完成，请稍后重新打开工作台。日志：{log}')
+
+
+def background_worker():
+    from storage import DATA
+    log = DATA / 'logs' / 'workbench.log'
+    log.parent.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(log, maxBytes=1024 * 1024, backupCount=2, encoding='utf-8')
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+    logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+    try:
+        with instance_lock(DATA / f'worker-{PORT}.lock'):
+            import app as application
+            import uvicorn
+            server = uvicorn.Server(uvicorn.Config(
+                application.app, host='127.0.0.1', port=PORT, access_log=False, log_config=None))
+            application.app.state.request_shutdown = lambda: setattr(server, 'should_exit', True)
+            try:
+                server.run()
+            finally:
+                application.app.state.request_shutdown = None
+    except Exception:
+        logging.exception('工作台后台运行失败')
+        return 1
+    finally:
+        handler.close()
+    return 0
 
 
 def listener_pids(output):
@@ -115,6 +188,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='长素材选句工作台')
     parser.add_argument('--self-check', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--serve-only', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--background-worker', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--picker-mode', choices=('video', 'directory'), help=argparse.SUPPRESS)
     parser.add_argument('--initial-directory', default=str(Path.home()), help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
@@ -129,26 +203,25 @@ def main(argv=None):
         import uvicorn
         uvicorn.run('app:app', host='127.0.0.1', port=PORT)
         return 0
+    if arguments.background_worker:
+        return background_worker()
     try:
         require_interactive_desktop()
-    except ValueError as error:
-        print(error)
+        from storage import DATA
+        with instance_lock(DATA / f'start-{PORT}.lock'):
+            existing = running_service()
+            if existing:
+                if (existing.get('app_id') == 'longvideo-editor' and
+                        existing.get('app_root') == str(APP) and
+                        existing.get('desktop_picker_ready') and existing.get('app_version') == APP_VERSION
+                        and existing.get('background_running')):
+                    webbrowser.open(URL)
+                    return 0
+                retire_isolated_service(existing)
+            return launch_background()
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        report_error(error)
         return 1
-    existing = running_service()
-    if existing:
-        if existing.get('desktop_picker_ready') and existing.get('app_version') == APP_VERSION:
-            webbrowser.open(URL)
-            return 0
-        try:
-            retire_isolated_service(existing)
-        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
-            print(error)
-            return 1
-    print('工作台正在启动，稍后会打开浏览器。关闭本窗口将停止服务。')
-    threading.Thread(target=open_when_ready, daemon=True).start()
-    import uvicorn
-    uvicorn.run('app:app', host='127.0.0.1', port=PORT)
-    return 0
 
 
 if __name__ == '__main__':

@@ -295,3 +295,39 @@ def test_empty_transcript_cannot_create_export_file(workspace):
                                      headers=HEADERS, json={})
     assert response.status_code == 400 and '尚无转写文稿' in response.json()['detail']
     assert list(workspace.transcripts.iterdir()) == []
+
+
+def test_startup_refines_existing_captions_and_keeps_one_local_backup(workspace):
+    from test_segmentation import sample
+    project = sample()
+    storage.save('project', project)
+    application.recover()
+    refined = storage.get('project', project['id'])
+    assert refined['segmentation_revision'] == 2
+    assert len(refined['sentences']) > len(project['sentences'])
+    backup = storage.get('transcript_backup', project['id'] + ':before-segmentation-v2')
+    assert backup['project'] == project
+    application.recover()
+    assert storage.get('project', project['id']) == refined
+    assert storage.get('transcript_backup', backup['id']) == backup
+
+
+def test_background_exit_is_guarded_and_stops_accepting_new_writes(workspace, monkeypatch):
+    scheduled = []
+    monkeypatch.setattr(application.app.state, 'request_shutdown', lambda: None, raising=False)
+    def timer(delay, callback):
+        return SimpleNamespace(start=lambda: scheduled.append(callback), daemon=False)
+    monkeypatch.setattr(application.threading, 'Timer', timer)
+    storage.save('job', {'id': 'active', 'kind': 'export', 'status': 'running'})
+    assert workspace.client.post('/api/shutdown', json={}).status_code == 403
+    assert workspace.client.post('/api/shutdown', headers=HEADERS, json={}).status_code == 409
+    assert scheduled == []
+    storage.update_job('active', status='succeeded')
+    with application.picker_lock:
+        assert workspace.client.post('/api/shutdown', headers=HEADERS, json={}).status_code == 409
+    assert workspace.client.get('/api/info').json()['background_running']
+    assert workspace.client.post('/api/shutdown', headers=HEADERS, json={}).json()['stopping']
+    assert len(scheduled) == 1
+    assert workspace.client.post('/api/import', headers=HEADERS, json={'path':str(workspace.source)}).status_code == 409
+    assert workspace.client.post('/api/shutdown', headers=HEADERS, json={}).status_code == 200
+    assert len(scheduled) == 1

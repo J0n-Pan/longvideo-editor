@@ -3,6 +3,7 @@ import copy
 import math
 import re
 import uuid
+from segmentation import split_tokens, token_text
 
 
 def safe_name(value):
@@ -46,14 +47,7 @@ def normalize_transcript(raw, asset_id, offset_ms=0, version=''):
                 continue
             tokens.append({'text': text, 'start_ms': round(start + offset_ms),
                            'end_ms': round(end + offset_ms)})
-        blocks, block = [], []
-        for token in tokens:
-            block.append(token)
-            if re.search(r'[。！？!?；;][”’\"\s]*$', token['text']):
-                blocks.append(block)
-                block = []
-        if block:
-            blocks.append(block)
+        blocks = split_tokens(tokens)
         if not blocks:
             start, end = sentence.get('begin_time'), sentence.get('end_time')
             if start is None or end is None:
@@ -62,13 +56,13 @@ def normalize_transcript(raw, asset_id, offset_ms=0, version=''):
                         'end_ms': round(end + offset_ms)}]]
         for block in blocks:
             i = len(output)
-            text = ''.join(t['text'] for t in block).strip()
+            text = token_text(block)
             if len(blocks) == 1:
                 text = sentence.get('text', text).strip()
             if not text or block[-1]['end_ms'] <= block[0]['start_ms']:
                 continue
-            sid = f'{asset_id}:{version[:8]}:{i}'
-            output.append({'id': sid, 'source_index': i, 'version': version,
+            sid = f'{asset_id}:{version[:8]}:f2:{i}'
+            output.append({'id': sid, 'source_index': i, 'version': version + ':segments-v2',
                            'start_ms': block[0]['start_ms'], 'end_ms': block[-1]['end_ms'],
                            'text': text, 'raw_text': text,
                            'words': [{**t, 'id': f'{sid}:w{k}'} for k, t in enumerate(block)]})

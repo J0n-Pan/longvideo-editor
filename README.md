@@ -4,13 +4,13 @@
 
 **Windows x64 · 本机剪辑 · 百炼云转写**
 
-[下载 Windows 免安装包](https://github.com/J0n-Pan/longvideo-editor/releases/download/v0.2.0-test.3/LongVideoEditor-0.2.0-test.3-windows-x64.zip) · [版本与校验文件](https://github.com/J0n-Pan/longvideo-editor/releases) · [使用说明](WINDOWS-QUICKSTART.md)
+[下载 Windows 免安装包](https://github.com/J0n-Pan/longvideo-editor/releases/download/v0.2.0-test.5/LongVideoEditor-0.2.0-test.5-windows-x64.zip) · [版本与校验文件](https://github.com/J0n-Pan/longvideo-editor/releases) · [使用说明](WINDOWS-QUICKSTART.md)
 
-当前测试版：`v0.2.0-test.3`，约 **97.8 MB**。已内置 Python、FFmpeg 和 FFprobe，无需另装运行环境。
+当前测试版：`v0.2.0-test.5`，约 **97.8 MB**。已内置 Python、FFmpeg 和 FFprobe，无需另装运行环境。
 
 ## 主要功能
 
-- **自动转写**：导入视频后生成带序号和时间定位的逐句文稿。
+- **自动转写**：导入视频后生成带序号和时间定位的文稿，按标点和停顿分段。
 - **文稿选句**：点击播放原片，支持单句、连续句和按序号批量选择。
 - **分组剪辑**：为短片命名，拖动调整句子顺序，手动微调片段边界。
 - **视频与文稿导出**：每组只生成一个 MP4；完整转写文稿可单独导出 TXT。
@@ -18,12 +18,12 @@
 ## 开始使用
 
 1. 下载并**完整解压**免安装包，保留整个程序文件夹。
-2. 双击 `启动工作台.cmd`，浏览器会自动打开工作台。
+2. 双击 `启动工作台.vbs`，浏览器会自动打开工作台，无需保留命令窗口。
 3. 打开“设置”，填写**自己的百炼 API Key**，选择视频和文稿的导出位置。
 4. 点击“导入素材”，等待转写完成，再从文稿中勾选需要的句子。
 5. 将句子加入分组，调整名称、顺序和边界，预览后导出当前组或全部组。
 
-任务进度和错误可在顶部“后台任务”中查看。关闭启动窗口会停止服务。
+任务进度和错误在“后台任务”中查看。关闭网页后后台继续运行，需要停止时在“设置”中点击“退出工作台”。
 
 ## 费用与数据
 

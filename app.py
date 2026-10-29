@@ -15,6 +15,7 @@ import asr
 from credentials import get_key, set_key, key_storage
 from file_picker import select_video_files, select_directory, desktop_picker_ready
 from domain import composition, normalize_transcript, choose_names
+from segmentation import refine_project, SEGMENTATION_REVISION
 from media import probe, extract_audio, render, verify_source
 from storage import (APP, LOCK, all_objects, get, save, update_job,
                      export_directory, set_export_directory, transcript_directory,
@@ -38,6 +39,8 @@ async def local_only(request: Request, call_next):
         expected = f'{request.url.scheme}://{request.url.netloc}'
         if request.headers.get('x-longvideo-client') != '1' or (origin and origin != expected):
             return JSONResponse({'detail': '请求来源无效'}, status_code=403)
+        if getattr(app.state, 'stopping', False) and request.url.path != '/api/shutdown':
+            return JSONResponse({'detail': '工作台正在退出，请重新启动后操作。'}, status_code=409)
     response = await call_next(request)
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'no-referrer'
@@ -66,6 +69,7 @@ def info():
             'model': asr.MODEL, 'credential_configured': bool(get_key()),
             'credential_storage': key_storage(),
             'desktop_picker_ready': desktop_picker_ready(),
+            'background_running': callable(getattr(app.state, 'request_shutdown', None)),
             **output_settings()}
 
 
@@ -295,13 +299,16 @@ def finish_asr_error(jid, status, error):
 
 
 def enqueue(kind, pid, payload, operation, **extra):
-    jid = uuid.uuid4().hex[:16]
-    job = {'id': jid, 'kind': kind, 'project_id': pid, 'payload': payload,
-           'status': 'queued', 'message': '等待执行', 'progress': 0, 'created_at': time.time(),
-           'results': [], **extra}
-    save('job', job)
-    cancellations[jid] = threading.Event()
-    pool.submit(job_worker, jid, lambda event: operation(jid, event))
+    with LOCK:
+        if getattr(app.state, 'stopping', False):
+            raise HTTPException(409, '工作台正在退出，请重新启动后操作。')
+        jid = uuid.uuid4().hex[:16]
+        job = {'id': jid, 'kind': kind, 'project_id': pid, 'payload': payload,
+               'status': 'queued', 'message': '等待执行', 'progress': 0, 'created_at': time.time(),
+               'results': [], **extra}
+        save('job', job)
+        cancellations[jid] = threading.Event()
+        pool.submit(job_worker, jid, lambda event: operation(jid, event))
     return job
 
 
@@ -354,6 +361,7 @@ def queue_transcription(pid):
         with LOCK:
             current = get('project', pid)
             current.update(sentences=sentences, asr_version=version, asr_status='已转写',
+                           segmentation_revision=SEGMENTATION_REVISION,
                            recognized_range={'start_ms': start, 'end_ms': end}, updated_at=time.time())
             current.pop('asr_error', None)
             save('project', current)
@@ -430,9 +438,39 @@ def exported_file(name: str):
 
 @app.on_event('startup')
 def recover():
+    app.state.stopping = False
     for job in all_objects('job'):
         if job['status'] in ('queued', 'running'):
             update_job(job['id'], status='interrupted', message='服务曾中断；识别任务可从缓存/云任务记录恢复')
+    for project in all_objects('project'):
+        upgraded = refine_project(project)
+        if upgraded is not None:
+            with LOCK:
+                backup_id = project['id'] + ':before-segmentation-v2'
+                try:
+                    get('transcript_backup', backup_id)
+                except KeyError:
+                    save('transcript_backup', {'id': backup_id, 'project': project,
+                                              'created_at': time.time()})
+                save('project', upgraded)
+
+
+@app.post('/api/shutdown')
+def shutdown():
+    callback = getattr(app.state, 'request_shutdown', None)
+    if not callable(callback):
+        raise HTTPException(409, '当前服务由调试窗口管理，请从桌面启动入口使用后台模式。')
+    with LOCK:
+        if any(j['status'] in ('queued', 'running') for j in all_objects('job')):
+            raise HTTPException(409, '后台任务尚未完成，请等待完成后再退出工作台。')
+        if picker_lock.locked():
+            raise HTTPException(409, '请先关闭文件或文件夹选择窗口，再退出工作台。')
+        if not getattr(app.state, 'stopping', False):
+            app.state.stopping = True
+            timer = threading.Timer(0.5, callback)
+            timer.daemon = True
+            timer.start()
+    return {'stopping': True}
 
 
 app.mount('/static', StaticFiles(directory=APP / 'static'), name='static')

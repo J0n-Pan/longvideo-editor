@@ -107,9 +107,16 @@ def build(args):
     package = dist / 'LongVideoEditor'
     executable = package / 'LongVideoEditor.exe'
     shutil.copyfile(APP / 'WINDOWS-QUICKSTART.md', package / '使用说明.md')
-    (package / '启动工作台.cmd').write_bytes(
-        b'@echo off\r\nsetlocal\r\nchcp 65001 >nul\r\ncd /d "%~dp0"\r\n'
-        b'"%~dp0LongVideoEditor.exe"\r\nif errorlevel 1 pause\r\n')
+    (package / '启动工作台.vbs').write_text(
+        'Option Explicit\nDim fs, shell, folder\n'
+        'Set fs = CreateObject("Scripting.FileSystemObject")\n'
+        'Set shell = CreateObject("WScript.Shell")\n'
+        'folder = fs.GetParentFolderName(WScript.ScriptFullName)\n'
+        'shell.Run Chr(34) & fs.BuildPath(folder, "LongVideoEditor.exe") & Chr(34), 0, False\n',
+        encoding='ascii')
+    allowed_root = {'LongVideoEditor.exe', '_internal', '启动工作台.vbs', '使用说明.md'}
+    if {path.name for path in package.iterdir()} != allowed_root:
+        raise RuntimeError('程序包根目录包含不属于当前版本的文件，停止压缩。')
     # Check without an installed Python on PATH or any inherited cloud credential.
     environment = {key: value for key, value in os.environ.items()
                    if key not in ('PYTHONPATH', 'PYTHONHOME', 'DASHSCOPE_API_KEY')}

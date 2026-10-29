@@ -76,4 +76,9 @@
 .location-action{align-self:stretch;display:flex;align-items:center;border-left:1px solid #dfe8e4;padding-left:14px}
 button.folder-change{padding:7px 14px;font-size:12px;color:var(--accent);border-color:#c6dcd3}
 #exportPathStatus:not(:empty){margin-top:10px}
+.runtime-controls{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:22px;padding-top:16px;border-top:1px solid #e2e9e5}
+.runtime-controls button{color:#775e55}
+.shutdown-screen{position:fixed;inset:78px 0 0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:var(--bg,#f5f7f6);text-align:center;padding:24px}
+.shutdown-screen h2{font-size:24px;margin:0;color:#344456}
+.shutdown-screen p{font-size:14px;color:var(--muted);line-height:1.8}
 @media(max-width:480px){.location-card{gap:10px;padding:12px}.location-action{padding-left:10px}button.folder-change{padding:7px 10px}}

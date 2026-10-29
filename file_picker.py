@@ -33,7 +33,7 @@ def desktop_picker_ready():
 
 def require_interactive_desktop():
     if not desktop_picker_ready():
-        raise ValueError('当前服务运行在隔离桌面，无法显示选择窗口。请从资源管理器双击“启动工作台.cmd”启动后重试。')
+        raise ValueError('当前服务运行在隔离桌面，无法显示选择窗口。请从资源管理器双击“启动工作台”入口后重试。')
 
 
 def select_video_files(initial_directory):
